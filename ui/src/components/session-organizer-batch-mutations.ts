@@ -18,7 +18,7 @@ import type { SessionOrganizerControllerHost } from "./session-organizer-control
 
 export type SessionActionRow = Pick<
   SidebarRecentSession,
-  "key" | "label" | "pinned" | "archived" | "active"
+  "key" | "sessionId" | "label" | "pinned" | "archived" | "active"
 >;
 
 export type SessionActionHost = Pick<
@@ -125,10 +125,20 @@ export async function patchSessionRows(
       return null;
     }
     const chunkRows = rows.slice(offset, offset + SESSIONS_PATCH_MANY_MAX_TARGETS);
+    if (typeof patch.archived === "boolean" && chunkRows.some((row) => !row.sessionId?.trim())) {
+      host.sessionData.publishSessionMutationError(
+        scope,
+        "Session lifecycle action requires a durable session identity.",
+      );
+      break;
+    }
     const params: SessionsPatchManyParams = {
       targets: chunkRows.map((row) => ({
         key: row.key,
         agentId: sessionRowAgentId(row, scope),
+        ...(typeof patch.archived === "boolean" && row.sessionId
+          ? { expectedSessionId: row.sessionId }
+          : {}),
       })),
       patch,
     };

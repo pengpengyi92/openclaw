@@ -187,6 +187,7 @@ suite.define(() => {
       );
       expect(requireRecord(patch.params)).toMatchObject({
         archived: true,
+        expectedSessionId: "session:agent:main:research",
         key: "agent:main:research",
       });
       expect(await gateway.getRequests("sessions.patch")).toHaveLength(1);
@@ -256,9 +257,13 @@ suite.define(() => {
       const patchMany = await gateway.waitForRequest("sessions.patchMany");
       const patchManyParams = requireRecord(patchMany.params);
       expect(patchManyParams.patch).toEqual({ archived: true });
-      expect(
-        (patchManyParams.targets as Array<{ key: string }>).map((target) => target.key),
-      ).toEqual([...batchKeys]);
+      expect(patchManyParams.targets).toEqual(
+        batchKeys.map((key) => ({
+          key,
+          agentId: "main",
+          expectedSessionId: `session:${key}`,
+        })),
+      );
       expect(await gateway.getRequests("sessions.patch")).toEqual([]);
       expect(await gateway.getRequests("sessions.abort")).toEqual([]);
       expect(await gateway.getRequests("agent.wait")).toEqual([]);

@@ -444,6 +444,9 @@ struct CommandCenterTab: View {
                                 session: session,
                                 categories: self.sessionCategories,
                                 isEnabled: self.sessionControlsAvailable,
+                                canArchive: ChatSessionSidebarModel.canArchiveSession(
+                                    session,
+                                    mainSessionKey: self.appModel.defaultChatSessionKey),
                                 actions: CommandSessionActions(
                                     rename: { self.patchSession(session, label: .some($0)) },
                                     moveToGroup: { self.patchSession(session, category: .some($0)) },
@@ -634,6 +637,7 @@ struct CommandCenterTab: View {
         self.performSessionMutation { transport in
             try await transport.patchSession(
                 key: session.key,
+                expectedSessionID: archived == nil ? nil : session.sessionId,
                 label: label,
                 category: category,
                 pinned: pinned,
@@ -652,6 +656,7 @@ struct CommandCenterTab: View {
         self.performSessionMutation(resetActiveSessionKey: session.key) { transport in
             try await transport.patchSession(
                 key: session.key,
+                expectedSessionID: session.sessionId,
                 label: nil,
                 category: nil,
                 pinned: nil,
@@ -1274,6 +1279,9 @@ struct CommandSessionsScreen: View {
             categories: self.sessionCategories,
             isArchived: session.archived == true,
             isEnabled: self.sessionControlsAvailable,
+            canArchive: ChatSessionSidebarModel.canArchiveSession(
+                session,
+                mainSessionKey: self.appModel.defaultChatSessionKey),
             actions: CommandSessionActions(
                 rename: { self.patchSession(session, label: .some($0)) },
                 moveToGroup: { self.patchSession(session, category: .some($0)) },
@@ -1305,6 +1313,7 @@ struct CommandSessionsScreen: View {
         self.performMutation { transport in
             try await transport.patchSession(
                 key: session.key,
+                expectedSessionID: archived == nil ? nil : session.sessionId,
                 label: label,
                 category: category,
                 pinned: pinned,
@@ -1324,6 +1333,7 @@ struct CommandSessionsScreen: View {
         self.performMutation(resetActiveSessionKey: archivesSession ? session.key : nil) { transport in
             try await transport.patchSession(
                 key: session.key,
+                expectedSessionID: session.sessionId,
                 label: nil,
                 category: nil,
                 pinned: nil,

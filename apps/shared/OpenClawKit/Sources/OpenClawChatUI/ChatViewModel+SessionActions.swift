@@ -280,8 +280,15 @@ extension OpenClawChatViewModel {
                     archived: nil,
                     unread: nil)
             case .archive:
+                guard let expectedSessionID = entries[key]?.sessionId?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                    !expectedSessionID.isEmpty
+                else {
+                    throw ChatSessionBatchValidationError.cannotArchive
+                }
                 try await routeLease.patchSession(
                     key: key,
+                    expectedSessionID: expectedSessionID,
                     label: nil,
                     category: nil,
                     pinned: nil,
@@ -740,9 +747,17 @@ extension OpenClawChatViewModel {
         }
     }
 
-    public func setSessionArchived(key: String, archived: Bool) {
+    public func setSessionArchived(_ session: OpenClawChatSessionEntry, archived: Bool) {
+        let key = session.key
         guard archived else {
-            Task { await self.restoreSession(key: key) }
+            Task { await self.restoreSession(session) }
+            return
+        }
+        guard let expectedSessionID = session.sessionId?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !expectedSessionID.isEmpty
+        else {
+            self.errorText = "Session lifecycle action requires a durable session identity."
             return
         }
         let previous = self.sessions
@@ -751,6 +766,7 @@ extension OpenClawChatViewModel {
             do {
                 try await self.transport.patchSession(
                     key: key,
+                    expectedSessionID: expectedSessionID,
                     label: nil,
                     category: nil,
                     pinned: nil,
@@ -774,10 +790,18 @@ extension OpenClawChatViewModel {
     /// Restores an archived session. Returns false (with `errorText` set) on
     /// failure so open-flows can avoid switching into a still-archived session.
     @discardableResult
-    public func restoreSession(key: String) async -> Bool {
+    public func restoreSession(_ session: OpenClawChatSessionEntry) async -> Bool {
+        guard let expectedSessionID = session.sessionId?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !expectedSessionID.isEmpty
+        else {
+            self.errorText = "Session lifecycle action requires a durable session identity."
+            return false
+        }
         do {
             try await self.transport.patchSession(
-                key: key,
+                key: session.key,
+                expectedSessionID: expectedSessionID,
                 label: nil,
                 category: nil,
                 pinned: nil,
