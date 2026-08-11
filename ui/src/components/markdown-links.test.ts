@@ -478,10 +478,11 @@ describe("toSanitizedMarkdownHtml links", () => {
 
   describe("github link marks", () => {
     it.each([
+      ["bare autolink", "https://github.com/openclaw/openclaw/pull/3434", "openclaw/openclaw#3434"],
       [
-        "bare autolink",
-        "https://github.com/openclaw/openclaw/pull/3434",
-        "https://github.com/openclaw/openclaw/pull/3434",
+        "bare issue autolink",
+        "https://github.com/openclaw/openclaw/issues/3435",
+        "openclaw/openclaw#3435",
       ],
       ["issue shorthand", "[#3434](https://github.com/openclaw/openclaw/pull/3434)", "#3434"],
       ["labelled link", "[the fix](https://github.com/openclaw/openclaw/pull/3434)", "the fix"],
@@ -492,8 +493,6 @@ describe("toSanitizedMarkdownHtml links", () => {
       const fragment = htmlFragment(toSanitizedMarkdownHtml(input));
       const link = fragment.querySelector<HTMLAnchorElement>("a");
       expect(link?.classList.contains("markdown-github-link")).toBe(true);
-      // The mark is CSS-only: the anchor keeps its authored text so copied text
-      // and screen-reader output stay unchanged.
       expect(link?.textContent).toBe(expectedText);
     });
 
