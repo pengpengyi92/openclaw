@@ -149,6 +149,22 @@
   vertical-align: middle;
 }
 
+/* Match the task-list control gutter, then keep expanded disclosure content
+   grouped on a subtle rail beneath its summary. */
+.chat-text :where(details) {
+  margin-inline-start: 0.4em;
+}
+
+.chat-text :where(details[open]) {
+  padding-inline-start: 1.2em;
+  border-inline-start: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+
+.chat-text :where(details[open] > summary) {
+  margin-inline-start: -1.2em;
+  margin-bottom: 0.6em;
+}
+
 .chat-text :where(a) {
   color: var(--accent);
   text-decoration: underline;
