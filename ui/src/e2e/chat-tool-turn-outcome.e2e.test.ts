@@ -85,7 +85,10 @@ suite.define(() => {
   });
 
   it("pairs a canonical parallel batch and renders per-file patch sections", async () => {
-    const context = await suite.browser.newContext({ viewport: { height: 900, width: 1200 } });
+    const context = await suite.browser.newContext({
+      locale: "en-US",
+      viewport: { height: 900, width: 1200 },
+    });
     const page = await context.newPage();
     await installMockGateway(page, {
       historyMessages: [
@@ -138,7 +141,7 @@ suite.define(() => {
     await page.goto(`${suite.server.baseUrl}chat`);
     const activity = page.locator(".chat-group--activity .chat-activity-group__summary");
     await activity.waitFor();
-    expect(await activity.textContent()).toContain("Read a file, edited 2 files");
+    expect(await activity.textContent()).toContain("Read a file, edited a file, created a file");
     if ((await activity.getAttribute("aria-expanded")) !== "true") {
       await activity.click();
     }
@@ -168,6 +171,59 @@ suite.define(() => {
     await rawDetails.click();
     await page.getByText("Applied patch", { exact: true }).waitFor();
     await captureToolActivityProof(page, "parallel-multifile-expanded");
+    await context.close();
+  });
+
+  it("labels a producer-recorded file creation as Created", async () => {
+    const context = await suite.browser.newContext({
+      colorScheme: "light",
+      locale: "en-US",
+      viewport: { height: 800, width: 1200 },
+    });
+    const page = await context.newPage();
+    await installMockGateway(page, {
+      historyMessages: [
+        {
+          role: "assistant",
+          content: [
+            {
+              type: "toolCall",
+              id: "call-create",
+              name: "apply_patch",
+              arguments: {
+                changes: [
+                  {
+                    path: "src/factrow.ts",
+                    kind: { type: "add" },
+                    diff: "export const fact = true;\n",
+                  },
+                ],
+              },
+            },
+          ],
+          timestamp: 1,
+        },
+        {
+          role: "toolResult",
+          toolCallId: "call-create",
+          toolName: "apply_patch",
+          content: [{ type: "text", text: "Applied patch" }],
+          timestamp: 2,
+        },
+      ],
+    });
+
+    await page.goto(`${suite.server.baseUrl}chat`);
+    const row = page.locator(".chat-tool-msg-summary", { hasText: "factrow.ts" });
+    await row.waitFor();
+    expect(await row.locator(".chat-tool-row__verb").textContent()).toBe("Created");
+    await captureToolActivityProof(page, "factrow-created-light");
+
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.dataset.themeMode))
+      .toBe("dark");
+    await captureToolActivityProof(page, "factrow-created-dark");
     await context.close();
   });
 
