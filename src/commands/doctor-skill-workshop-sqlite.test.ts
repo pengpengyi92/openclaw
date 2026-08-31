@@ -416,31 +416,44 @@ describe("doctor Skill Workshop SQLite migration", () => {
       missingFile: "proposal.json",
       remainingFile: "PROPOSAL.md",
       remainingContent: "# Recoverable draft\n",
-      existingArchive: false,
+      existingArchive: "none",
     },
     {
       proposalId: "orphan-missing-draft-20260829",
       missingFile: "PROPOSAL.md",
       remainingFile: "proposal.json",
       remainingContent: "{}",
-      existingArchive: true,
+      existingArchive: "directory",
+    },
+    {
+      proposalId: "orphan-existing-file-20260829",
+      missingFile: "proposal.json",
+      remainingFile: "PROPOSAL.md",
+      remainingContent: "# Recoverable draft with file collision\n",
+      existingArchive: "file",
     },
   ])(
-    "archives a nonempty proposal missing $missingFile and converges",
+    "archives a nonempty proposal missing $missingFile with $existingArchive collision and converges",
     async ({ proposalId, remainingFile, remainingContent, existingArchive }) => {
       const proposalDir = path.join(testState.stateDir, "skill-workshop", "proposals", proposalId);
       const recoveryRoot = path.join(testState.stateDir, "skill-workshop", "recovery");
-      const recoveryDir = path.join(recoveryRoot, `${proposalId}${existingArchive ? ".2" : ""}`);
+      const recoveryDir = path.join(
+        recoveryRoot,
+        `${proposalId}${existingArchive === "none" ? "" : ".2"}`,
+      );
       await fs.mkdir(proposalDir, { recursive: true });
       await fs.writeFile(path.join(proposalDir, remainingFile), remainingContent, "utf8");
       await fs.writeFile(path.join(proposalDir, "recovery-notes.txt"), "preserve me\n", "utf8");
-      if (existingArchive) {
+      if (existingArchive === "directory") {
         await fs.mkdir(path.join(recoveryRoot, proposalId), { recursive: true });
         await fs.writeFile(
           path.join(recoveryRoot, proposalId, "existing.txt"),
           "keep me\n",
           "utf8",
         );
+      } else if (existingArchive === "file") {
+        await fs.mkdir(recoveryRoot, { recursive: true });
+        await fs.writeFile(path.join(recoveryRoot, proposalId), "keep file\n", "utf8");
       }
 
       const result = await migrateLegacySkillWorkshopProposals({ config: {} });
@@ -461,10 +474,14 @@ describe("doctor Skill Workshop SQLite migration", () => {
       await expect(fs.readFile(path.join(recoveryDir, "recovery-notes.txt"), "utf8")).resolves.toBe(
         "preserve me\n",
       );
-      if (existingArchive) {
+      if (existingArchive === "directory") {
         await expect(
           fs.readFile(path.join(recoveryRoot, proposalId, "existing.txt"), "utf8"),
         ).resolves.toBe("keep me\n");
+      } else if (existingArchive === "file") {
+        await expect(fs.readFile(path.join(recoveryRoot, proposalId), "utf8")).resolves.toBe(
+          "keep file\n",
+        );
       }
 
       await expect(migrateLegacySkillWorkshopProposals({ config: {} })).resolves.toEqual({
