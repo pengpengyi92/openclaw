@@ -1,11 +1,12 @@
 /** Doctor-owned migration of Skill Workshop proposal metadata into shared SQLite. */
+import fs from "node:fs/promises";
 import path from "node:path";
 import { listAgentIds, resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
 import { resolveStateDir } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isMissingPathError } from "../infra/errors.js";
 import { removePathWithinRoot } from "../infra/fs-safe-remove.js";
-import { pathExists, root, type Root } from "../infra/fs-safe.js";
+import { ensureAbsoluteDirectory, pathExists, root, type Root } from "../infra/fs-safe.js";
 import { normalizeAgentId, parseAgentSessionKey } from "../routing/session-key.js";
 import {
   hashSkillProposalContent,
@@ -19,6 +20,7 @@ import type { SkillProposalRecord, SkillProposalRollback } from "../skills/works
 
 const WORKSHOP_DIR = "skill-workshop";
 const PROPOSALS_DIR = `${WORKSHOP_DIR}/proposals`;
+const RECOVERY_DIR = `${WORKSHOP_DIR}/recovery`;
 const MANIFEST_PATH = `${WORKSHOP_DIR}/proposals.json`;
 const MAX_RECORD_BYTES = 1024 * 1024;
 // Legacy rollback JSON can expand control characters sixfold across 1 MiB of
@@ -175,6 +177,36 @@ async function migrateProposal(params: {
   return result;
 }
 
+async function recoverIncompleteProposal(params: {
+  env: NodeJS.ProcessEnv;
+  proposalId: string;
+  stateDir: string;
+  stateRoot: Root;
+}): Promise<string | undefined> {
+  const proposalDir = `${PROPOSALS_DIR}/${params.proposalId}`;
+  if (await readSkillProposal(params.proposalId, { env: params.env }, {}, { reconcile: false })) {
+    return undefined;
+  }
+  const entries = await params.stateRoot.list(proposalDir, { withFileTypes: true });
+  if (entries.length === 0) {
+    await params.stateRoot.remove(proposalDir);
+    return `Removed empty incomplete Skill Workshop proposal ${params.proposalId}.`;
+  }
+
+  const recoveryDir = await ensureAbsoluteDirectory(path.join(params.stateDir, RECOVERY_DIR), {
+    scopeLabel: "Skill Workshop recovery directory",
+  });
+  if (!recoveryDir.ok) {
+    throw recoveryDir.error;
+  }
+  let recoveryPath = path.join(recoveryDir.path, params.proposalId);
+  for (let suffix = 2; await pathExists(recoveryPath); suffix += 1) {
+    recoveryPath = path.join(recoveryDir.path, `${params.proposalId}.${suffix}`);
+  }
+  await fs.rename(path.join(params.stateDir, proposalDir), recoveryPath);
+  return `Archived incomplete Skill Workshop proposal ${params.proposalId} for recovery at ${recoveryPath}.`;
+}
+
 /** Import verified legacy proposal sidecars, then remove only the imported JSON metadata. */
 export async function migrateLegacySkillWorkshopProposals(params: {
   config: OpenClawConfig;
@@ -215,6 +247,7 @@ export async function migrateLegacySkillWorkshopProposals(params: {
     .map((entry) => entry.name)
     .toSorted((left, right) => left.localeCompare(right));
   const warnings: string[] = [];
+  const changes: string[] = [];
   let migrated = 0;
   for (const proposalId of proposalIds) {
     try {
@@ -227,7 +260,16 @@ export async function migrateLegacySkillWorkshopProposals(params: {
       migrated += 1;
     } catch (error) {
       if (isMissingPathError(error)) {
-        if (await readSkillProposal(proposalId, { env }, {}, { reconcile: false })) {
+        try {
+          const change = await recoverIncompleteProposal({ env, proposalId, stateDir, stateRoot });
+          if (change) {
+            changes.push(change);
+          }
+          continue;
+        } catch (recoveryError) {
+          warnings.push(
+            `Failed to recover incomplete Skill Workshop proposal ${proposalId}: ${String(recoveryError)}`,
+          );
           continue;
         }
       }
@@ -241,13 +283,13 @@ export async function migrateLegacySkillWorkshopProposals(params: {
       }
     },
   );
+  if (migrated > 0) {
+    changes.unshift(
+      `Migrated ${migrated} Skill Workshop proposal${migrated === 1 ? "" : "s"} into shared SQLite.`,
+    );
+  }
   return {
-    changes:
-      migrated > 0
-        ? [
-            `Migrated ${migrated} Skill Workshop proposal${migrated === 1 ? "" : "s"} into shared SQLite.`,
-          ]
-        : [],
+    changes,
     warnings,
     detected: proposalIds.length,
     migrated,

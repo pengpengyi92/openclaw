@@ -357,6 +357,19 @@ describe("doctor Skill Workshop SQLite migration", () => {
     expect(openOpenClawStateDatabase().db.prepare("PRAGMA user_version").get()).toEqual({
       user_version: OPENCLAW_STATE_SCHEMA_VERSION,
     });
+    await expect(
+      migrateLegacySkillWorkshopProposals({
+        config: {
+          agents: {
+            entries: {
+              main: { workspace: oldWorkspace },
+              other: { workspace: currentWorkspace },
+            },
+          },
+        },
+      }),
+    ).resolves.toMatchObject({ changes: [], warnings: [], detected: 1, migrated: 0 });
+    await expect(fs.readFile(path.join(proposalDir, "PROPOSAL.md"), "utf8")).resolves.toBe(content);
 
     const ambiguousId = "ambiguous-workshop-20260727-1234567890";
     const ambiguousDir = path.join(testState.stateDir, "skill-workshop", "proposals", ambiguousId);
@@ -395,5 +408,91 @@ describe("doctor Skill Workshop SQLite migration", () => {
       expect.stringContaining("owning agent could not be inferred"),
     ]);
     await expect(fs.access(path.join(ambiguousDir, "proposal.json"))).resolves.toBeUndefined();
+  });
+
+  it.each([
+    {
+      proposalId: "orphan-missing-record-20260829",
+      missingFile: "proposal.json",
+      remainingFile: "PROPOSAL.md",
+      remainingContent: "# Recoverable draft\n",
+      existingArchive: false,
+    },
+    {
+      proposalId: "orphan-missing-draft-20260829",
+      missingFile: "PROPOSAL.md",
+      remainingFile: "proposal.json",
+      remainingContent: "{}",
+      existingArchive: true,
+    },
+  ])(
+    "archives a nonempty proposal missing $missingFile and converges",
+    async ({ proposalId, remainingFile, remainingContent, existingArchive }) => {
+      const proposalDir = path.join(testState.stateDir, "skill-workshop", "proposals", proposalId);
+      const recoveryRoot = path.join(testState.stateDir, "skill-workshop", "recovery");
+      const recoveryDir = path.join(recoveryRoot, `${proposalId}${existingArchive ? ".2" : ""}`);
+      await fs.mkdir(proposalDir, { recursive: true });
+      await fs.writeFile(path.join(proposalDir, remainingFile), remainingContent, "utf8");
+      await fs.writeFile(path.join(proposalDir, "recovery-notes.txt"), "preserve me\n", "utf8");
+      if (existingArchive) {
+        await fs.mkdir(path.join(recoveryRoot, proposalId), { recursive: true });
+        await fs.writeFile(
+          path.join(recoveryRoot, proposalId, "existing.txt"),
+          "keep me\n",
+          "utf8",
+        );
+      }
+
+      const result = await migrateLegacySkillWorkshopProposals({ config: {} });
+      expect(result).toMatchObject({
+        warnings: [],
+        detected: 1,
+        migrated: 0,
+      });
+      expect(result.changes).toEqual([
+        expect.stringContaining(
+          `Archived incomplete Skill Workshop proposal ${proposalId} for recovery at `,
+        ),
+      ]);
+      await expect(fs.access(proposalDir)).rejects.toThrow();
+      await expect(fs.readFile(path.join(recoveryDir, remainingFile), "utf8")).resolves.toBe(
+        remainingContent,
+      );
+      await expect(fs.readFile(path.join(recoveryDir, "recovery-notes.txt"), "utf8")).resolves.toBe(
+        "preserve me\n",
+      );
+      if (existingArchive) {
+        await expect(
+          fs.readFile(path.join(recoveryRoot, proposalId, "existing.txt"), "utf8"),
+        ).resolves.toBe("keep me\n");
+      }
+
+      await expect(migrateLegacySkillWorkshopProposals({ config: {} })).resolves.toEqual({
+        changes: [],
+        warnings: [],
+        detected: 0,
+        migrated: 0,
+      });
+    },
+  );
+
+  it("removes an empty incomplete proposal directory and converges", async () => {
+    const proposalId = "orphan-empty-proposal-20260829";
+    const proposalDir = path.join(testState.stateDir, "skill-workshop", "proposals", proposalId);
+    await fs.mkdir(proposalDir, { recursive: true });
+
+    await expect(migrateLegacySkillWorkshopProposals({ config: {} })).resolves.toEqual({
+      changes: [`Removed empty incomplete Skill Workshop proposal ${proposalId}.`],
+      warnings: [],
+      detected: 1,
+      migrated: 0,
+    });
+    await expect(fs.access(proposalDir)).rejects.toThrow();
+    await expect(migrateLegacySkillWorkshopProposals({ config: {} })).resolves.toEqual({
+      changes: [],
+      warnings: [],
+      detected: 0,
+      migrated: 0,
+    });
   });
 });
